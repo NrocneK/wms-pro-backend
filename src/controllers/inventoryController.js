@@ -120,7 +120,9 @@ const getInventory = async (req, res) => {
     else if (warehouse_id) { where += " AND warehouse_id=?"; params.push(warehouse_id); }
     if (status) { where += " AND status=?"; params.push(status); }
     const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM v_inventory_full ${where}`, params);
-    const [rows] = await db.execute(`SELECT * FROM v_inventory_full ${where} ORDER BY product_name LIMIT ? OFFSET ?`, [...params, parseInt(limit), offset]);
+    const limitNum = parseInt(limit) || 50;
+    const offsetNum = offset;
+    const [rows] = await db.execute(`SELECT * FROM v_inventory_full ${where} ORDER BY product_name LIMIT ${limitNum} OFFSET ${offsetNum}`, params);
     return R.ok(res, { items: rows, pagination: { total, page: parseInt(page), limit: parseInt(limit), totalPages: Math.ceil(total / limit) } });
   } catch (err) { return R.serverError(res, err); }
 };
@@ -322,8 +324,8 @@ const getActivityHistoryDates = async (req, res) => {
       ) i ON i.order_id=o.id AND i.type=o.type
       GROUP BY DATE_FORMAT(o.confirmed_at,'%Y-%m-%d')
       ORDER BY date DESC
-      LIMIT ? OFFSET ?`,
-      [...whParams, ...whParams, limit, offset]
+     LIMIT ${limit} OFFSET ${offset}`,
+      [...whParams, ...whParams]
     );
 
     // total_count tính ở JS (không dùng COUNT(DISTINCT t.id) trong SQL) vì id của
