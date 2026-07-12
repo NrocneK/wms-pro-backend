@@ -29,10 +29,10 @@ const getDashboard = async (req, res) => {
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
     const [[todayStats]] = await db.execute(`
-        SELECT
-          (SELECT COUNT(*) FROM import_orders WHERE status='confirmed' AND DATE(confirmed_at)=? ${whIO}) AS today_imports,
-          (SELECT COUNT(*) FROM export_orders WHERE status='confirmed' AND DATE(confirmed_at)=? ${whIO}) AS today_exports
-      `, [todayStr, ...whParams, todayStr, ...whParams]);
+      SELECT
+        (SELECT COUNT(*) FROM import_orders WHERE status='confirmed' AND import_date=? ${whIO}) AS today_imports,
+        (SELECT COUNT(*) FROM export_orders WHERE status='confirmed' AND export_date=? ${whIO}) AS today_exports
+    `, [todayStr, ...whParams, todayStr, ...whParams]);
 
     // ── Cửa sổ 7 ngày trượt được ─────────────────────────────
     // week_offset=0 → 7 ngày gần nhất, week_offset=1 → 7 ngày liền trước, v.v.
@@ -49,24 +49,24 @@ const getDashboard = async (req, res) => {
 
     // Biểu đồ theo GIÁ TRỊ (quantity × unit_price) thay vì đếm số phiếu
     const [activity] = await db.execute(`
-      SELECT DATE_FORMAT(o.confirmed_at,'%Y-%m-%d') AS date,
+      SELECT DATE_FORMAT(o.activity_date,'%Y-%m-%d') AS date,
              COALESCE(SUM(CASE WHEN o.type='import' THEN i.line_value ELSE 0 END),0) AS import_value,
              COALESCE(SUM(CASE WHEN o.type='export' THEN i.line_value ELSE 0 END),0) AS export_value,
              COUNT(DISTINCT CASE WHEN o.type='import' THEN o.id END) AS import_count,
              COUNT(DISTINCT CASE WHEN o.type='export' THEN o.id END) AS export_count
       FROM (
-        SELECT id, confirmed_at, warehouse_id, 'import' AS type FROM import_orders
-          WHERE status='confirmed' AND DATE(confirmed_at) BETWEEN ? AND ? ${whIO}
+        SELECT id, import_date AS activity_date, warehouse_id, 'import' AS type FROM import_orders
+          WHERE status='confirmed' AND import_date BETWEEN ? AND ? ${whIO}
         UNION ALL
-        SELECT id, confirmed_at, warehouse_id, 'export' AS type FROM export_orders
-          WHERE status='confirmed' AND DATE(confirmed_at) BETWEEN ? AND ? ${whIO}
+        SELECT id, export_date AS activity_date, warehouse_id, 'export' AS type FROM export_orders
+          WHERE status='confirmed' AND export_date BETWEEN ? AND ? ${whIO}
       ) o
       LEFT JOIN (
         SELECT import_order_id AS order_id, 'import' AS type, quantity*unit_price AS line_value FROM import_items
         UNION ALL
         SELECT export_order_id AS order_id, 'export' AS type, quantity*unit_price AS line_value FROM export_items
       ) i ON i.order_id=o.id AND i.type=o.type
-      GROUP BY DATE_FORMAT(o.confirmed_at,'%Y-%m-%d')
+      GROUP BY DATE_FORMAT(o.activity_date,'%Y-%m-%d')
       ORDER BY date ASC`,
       [range_start, range_end, ...whParams, range_start, range_end, ...whParams]
     );
@@ -75,10 +75,10 @@ const getDashboard = async (req, res) => {
     const [[{ has_older }]] = await db.execute(`
       SELECT EXISTS(
         SELECT 1 FROM (
-          SELECT confirmed_at FROM import_orders WHERE status='confirmed' ${whIO}
+          SELECT import_date AS activity_date FROM import_orders WHERE status='confirmed' ${whIO}
           UNION ALL
-          SELECT confirmed_at FROM export_orders WHERE status='confirmed' ${whIO}
-        ) t WHERE DATE(t.confirmed_at) < ?
+          SELECT export_date AS activity_date FROM export_orders WHERE status='confirmed' ${whIO}
+        ) t WHERE t.activity_date < ?
       ) AS has_older`, [...whParams, ...whParams, range_start]);
 
     const { whClause: wClause, whParams: wParams } = warehouseGuard(req.user, "w.id");
@@ -307,38 +307,35 @@ const getActivityHistoryDates = async (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
 
     const [rows] = await db.execute(`
-      SELECT DATE_FORMAT(o.confirmed_at,'%Y-%m-%d') AS date,
+      SELECT DATE_FORMAT(o.activity_date,'%Y-%m-%d') AS date,
              COUNT(DISTINCT CASE WHEN o.type='import' THEN o.id END) AS import_count,
              COUNT(DISTINCT CASE WHEN o.type='export' THEN o.id END) AS export_count,
              COALESCE(SUM(CASE WHEN o.type='import' THEN i.line_value ELSE 0 END),0) AS import_value,
              COALESCE(SUM(CASE WHEN o.type='export' THEN i.line_value ELSE 0 END),0) AS export_value
       FROM (
-        SELECT id, confirmed_at, 'import' AS type FROM import_orders WHERE status='confirmed' ${whClause}
+        SELECT id, import_date AS activity_date, 'import' AS type FROM import_orders WHERE status='confirmed' ${whClause}
         UNION ALL
-        SELECT id, confirmed_at, 'export' AS type FROM export_orders WHERE status='confirmed' ${whClause}
+        SELECT id, export_date AS activity_date, 'export' AS type FROM export_orders WHERE status='confirmed' ${whClause}
       ) o
       LEFT JOIN (
         SELECT import_order_id AS order_id, 'import' AS type, quantity*unit_price AS line_value FROM import_items
         UNION ALL
         SELECT export_order_id AS order_id, 'export' AS type, quantity*unit_price AS line_value FROM export_items
       ) i ON i.order_id=o.id AND i.type=o.type
-      GROUP BY DATE_FORMAT(o.confirmed_at,'%Y-%m-%d')
+      GROUP BY DATE_FORMAT(o.activity_date,'%Y-%m-%d')
       ORDER BY date DESC
      LIMIT ${limit} OFFSET ${offset}`,
       [...whParams, ...whParams]
     );
 
-    // total_count tính ở JS (không dùng COUNT(DISTINCT t.id) trong SQL) vì id của
-    // import_orders và export_orders là 2 dãy tăng độc lập, có thể trùng số —
-    // nếu DISTINCT gộp chung cả 2 loại sẽ đếm thiếu khi trùng id giữa 2 bảng.
     rows.forEach(r => { r.total_count = r.import_count + r.export_count; });
 
     const [[{ total_dates }]] = await db.execute(`
-      SELECT COUNT(DISTINCT DATE_FORMAT(t.confirmed_at,'%Y-%m-%d')) AS total_dates
+      SELECT COUNT(DISTINCT DATE_FORMAT(t.activity_date,'%Y-%m-%d')) AS total_dates
       FROM (
-        SELECT confirmed_at FROM import_orders WHERE status='confirmed' ${whClause}
+        SELECT import_date AS activity_date FROM import_orders WHERE status='confirmed' ${whClause}
         UNION ALL
-        SELECT confirmed_at FROM export_orders WHERE status='confirmed' ${whClause}
+        SELECT export_date AS activity_date FROM export_orders WHERE status='confirmed' ${whClause}
       ) t`, [...whParams, ...whParams]);
 
     return R.ok(res, {
@@ -366,7 +363,7 @@ const getOrdersByDate = async (req, res) => {
       FROM import_orders io
       JOIN warehouses w ON w.id=io.warehouse_id
       LEFT JOIN users u ON u.id=CAST(io.created_by AS UNSIGNED)
-      WHERE io.status='confirmed' AND DATE(io.confirmed_at)=? ${ioC}
+      WHERE io.status='confirmed' AND io.import_date=? ${ioC}
       UNION ALL
       SELECT eo.id AS order_id,'export' AS type,eo.ref_no,eo.export_date AS txn_date,eo.total_items,
              eo.confirmed_at,w.code AS warehouse_code,u.full_name AS created_by_name,
@@ -374,8 +371,8 @@ const getOrdersByDate = async (req, res) => {
       FROM export_orders eo
       JOIN warehouses w ON w.id=eo.warehouse_id
       LEFT JOIN users u ON u.id=CAST(eo.created_by AS UNSIGNED)
-      WHERE eo.status='confirmed' AND DATE(eo.confirmed_at)=? ${eoC}
-      ORDER BY confirmed_at DESC`,
+      WHERE eo.status='confirmed' AND eo.export_date=? ${eoC}
+      ORDER BY txn_date DESC`,
       [date, ...ioP, date, ...eoP]
     );
 
