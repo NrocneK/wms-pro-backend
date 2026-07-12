@@ -44,9 +44,9 @@ const importReplace = async (req, res) => {
 
     for (const row of rows) {
       await conn.execute(
-        `INSERT INTO products(barcode,name,unit,cost_price)
-         VALUES(?,?,'Cái',?)
-         ON DUPLICATE KEY UPDATE name=VALUES(name), cost_price=VALUES(cost_price)`,
+        `INSERT INTO products(barcode,name,unit,cost_price,is_active)
+        VALUES(?,?,'Cái',?,1)
+        ON DUPLICATE KEY UPDATE name=VALUES(name), cost_price=VALUES(cost_price), is_active=1`,
         [row.barcode, row.name || "(Chưa có tên)", row.cost_price]
       );
     }
@@ -92,7 +92,8 @@ const previewReplace = async (req, res) => {
     const zeroQty = rows.filter(r => r.quantity === 0).length;
     const noLocation = rows.filter(r => !r.location).length;
     const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
-    return R.ok(res, { total_rows: rows.length, warehouses, zero_qty: zeroQty, no_location: noLocation, total_qty: totalQty, sample: rows.slice(0, 5) });
+    const totalValue = rows.reduce((s, r) => s + r.quantity * r.cost_price, 0);
+    return R.ok(res, { total_rows: rows.length, warehouses, zero_qty: zeroQty, no_location: noLocation, total_qty: totalQty, total_value: totalValue, sample: rows.slice(0, 5) });
   } catch (err) { return R.serverError(res, err); }
 };
 
