@@ -66,6 +66,7 @@ router.put("/exports/items/:itemId/actual-quantity", authorize("admin", "manager
 // USERS — chỉ admin
 router.get("/users", authorize("admin"), userCtrl.getAll);
 router.post("/users", authorize("admin"), userCtrl.create);
+router.put("/users/me", userCtrl.updateSelf);
 router.put("/users/:id", authorize("admin"), userCtrl.update);
 router.post("/users/:id/reset-password", authorize("admin"), userCtrl.resetPassword);
 router.delete("/users/:id", authorize("admin"), userCtrl.remove);

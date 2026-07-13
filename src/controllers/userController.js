@@ -54,6 +54,16 @@ const update = async (req, res) => {
   finally { conn.release(); }
 };
 
+const updateSelf = async (req, res) => {
+  try {
+    const { full_name } = req.body;
+    if (!full_name || !full_name.trim()) return R.badRequest(res, "Họ và tên không được để trống");
+    await db.execute("UPDATE users SET full_name=? WHERE id=?", [full_name.trim(), req.user.id]);
+    await writeLog(db, req.user, "UPDATE", "user", req.user.id, `Tự cập nhật họ tên: ${full_name.trim()}`);
+    return R.ok(res, { full_name: full_name.trim() }, "Cập nhật thông tin thành công");
+  } catch (err) { return R.serverError(res, err); }
+};
+
 const resetPassword = async (req, res) => {
   try {
     const { new_password } = req.body;
@@ -72,4 +82,4 @@ const remove = async (req, res) => {
   } catch (err) { return R.serverError(res, err); }
 };
 
-module.exports = { getAll, create, update, resetPassword, remove };
+module.exports = { getAll, create, update, updateSelf, resetPassword, remove };
