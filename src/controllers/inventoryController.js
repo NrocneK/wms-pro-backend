@@ -3,6 +3,7 @@
 const db = require("../config/db");
 const R = require("../utils/response");
 const { warehouseGuard, assertWarehouse } = require("../utils/warehouseGuard");
+const { writeLog } = require("../utils/auditLog");
 
 const getDashboard = async (req, res) => {
   try {
@@ -232,6 +233,8 @@ const createInventoryItem = async (req, res) => {
       [product.id, wh.id, location_text || "", qty, minS, calcStatus(qty, minS)]
     );
     await conn.commit();
+    await writeLog(db, req.user, "CREATE", "inventory", product.id,
+      `Thêm mới sản phẩm "${name}" (${barcode}) vào kho ${warehouse_code}, SL: ${qty}`);
     return R.created(res, {});
   } catch (err) {
     await conn.rollback();
@@ -257,7 +260,10 @@ const updateInventoryItem = async (req, res) => {
       [Number(min_stock) || 5, location_text || "", req.params.id]
     );
     await conn.commit();
+    await writeLog(db, req.user, "UPDATE", "inventory", req.params.id,
+      `Cập nhật sản phẩm "${name}" (id tồn kho=${req.params.id}): giá vốn=${cost_price}, giá bán=${sell_price}, tồn tối thiểu=${min_stock}, vị trí=${location_text || "—"}`);
     return R.ok(res, {});
+
   } catch (err) {
     await conn.rollback();
     return R.serverError(res, err);
@@ -266,10 +272,16 @@ const updateInventoryItem = async (req, res) => {
 
 const removeInventoryItem = async (req, res) => {
   try {
-    const [[inv]] = await db.execute("SELECT warehouse_id FROM inventory WHERE id=?", [req.params.id]);
+    const [[inv]] = await db.execute(
+      `SELECT inv.warehouse_id, p.name AS product_name, p.barcode
+       FROM inventory inv JOIN products p ON p.id=inv.product_id
+       WHERE inv.id=?`, [req.params.id]
+    );
     if (!inv) return R.notFound(res, "Không tìm thấy sản phẩm");
     if (!assertWarehouse(inv.warehouse_id, req.user)) return R.forbidden(res, "Bạn không có quyền xóa ở kho này");
     await db.execute("DELETE FROM inventory WHERE id=?", [req.params.id]);
+    await writeLog(db, req.user, "DELETE", "inventory", req.params.id,
+      `Xóa sản phẩm "${inv.product_name}" (${inv.barcode}) khỏi kho`);
     return R.ok(res, {});
   } catch (err) { return R.serverError(res, err); }
 };
@@ -282,7 +294,9 @@ const removeBatchInventory = async (req, res) => {
 
     // Kiểm tra quyền từng kho trước khi xóa
     const [invRows] = await db.execute(
-      `SELECT id, warehouse_id FROM inventory WHERE id IN (${ids.map(() => "?").join(",")})`,
+      `SELECT inv.id, inv.warehouse_id, p.name AS product_name, p.barcode
+       FROM inventory inv JOIN products p ON p.id=inv.product_id
+       WHERE inv.id IN (${ids.map(() => "?").join(",")})`,
       ids
     );
     for (const inv of invRows) {
@@ -294,6 +308,8 @@ const removeBatchInventory = async (req, res) => {
       `DELETE FROM inventory WHERE id IN (${ids.map(() => "?").join(",")})`,
       ids
     );
+    await writeLog(db, req.user, "DELETE", "inventory", null,
+      `Xóa hàng loạt ${result.affectedRows} sản phẩm: ${invRows.map(i => i.barcode).join(", ")}`);
     return R.ok(res, { deleted: result.affectedRows });
   } catch (err) { return R.serverError(res, err); }
 };
