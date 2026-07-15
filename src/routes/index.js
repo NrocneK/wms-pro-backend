@@ -121,7 +121,7 @@ router.get("/dashboard/history-dates", inventoryCtrl.getActivityHistoryDates);
 router.get("/dashboard/history-orders", inventoryCtrl.getOrdersByDate);
 router.get("/inventory", inventoryCtrl.getInventory);
 router.get("/inventory/alerts", inventoryCtrl.getAlerts);
-router.post("/inventory", authorize("admin", "manager"), inventoryCtrl.createInventoryItem);
+router.post("/inventory", authorize("admin", "manager", "staff"), inventoryCtrl.createInventoryItem);
 router.put("/inventory/:id", authorize("admin", "manager"), inventoryCtrl.updateInventoryItem);
 router.delete("/inventory/batch", authorize("admin"), inventoryCtrl.removeBatchInventory);
 router.delete("/inventory/:id", authorize("admin"), inventoryCtrl.removeInventoryItem);

@@ -2,6 +2,8 @@
 const db = require("../config/db");
 const R = require("../utils/response");
 const { warehouseGuard, assertWarehouse } = require("../utils/warehouseGuard");
+const { writeLog } = require("../utils/auditLog");
+
 const calcStatus = (qty, min = 5) =>
   qty === 0 ? "zero" : qty <= min ? "low" : qty <= min * 2 ? "warning" : "ok";
 
@@ -18,9 +20,10 @@ const getAll = async (req, res) => {
     const params = [];
     let where = "WHERE p.is_active=1";
     if (search) {
-      where += " AND (p.barcode LIKE ? OR p.name LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`);
+      where += " AND (p.barcode LIKE ? OR p.name LIKE ? OR p.supplier_code LIKE ? OR p.supplier_name LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
+
     const { whId, whClause, whParams } = warehouseGuard(
       req.user,
       "inv.warehouse_id"
@@ -41,7 +44,7 @@ const getAll = async (req, res) => {
       params
     );
     const [rows] = await db.execute(
-      `SELECT p.id,p.barcode,p.name,p.unit,p.cost_price,p.sell_price,COALESCE(inv.quantity,0) AS quantity,COALESCE(inv.min_stock,5) AS min_stock,COALESCE(inv.status,'zero') AS status,inv.location_text AS location,inv.zero_since,w.id AS warehouse_id,w.code AS warehouse_code,w.name AS warehouse_name,p.updated_at FROM products p LEFT JOIN inventory inv ON inv.product_id=p.id LEFT JOIN warehouses w ON w.id=inv.warehouse_id ${where} ORDER BY p.name LIMIT ? OFFSET ?`,
+      `SELECT p.id,p.barcode,p.name,p.unit,p.cost_price,p.sell_price,p.supplier_code,p.supplier_name,COALESCE(inv.quantity,0) AS quantity,COALESCE(inv.min_stock,5) AS min_stock,COALESCE(inv.status,'zero') AS status,inv.location_text AS location,inv.zero_since,w.id AS warehouse_id,w.code AS warehouse_code,w.name AS warehouse_name,p.updated_at FROM products p LEFT JOIN inventory inv ON inv.product_id=p.id LEFT JOIN warehouses w ON w.id=inv.warehouse_id ${where} ORDER BY p.name LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
     return R.ok(res, {
@@ -84,24 +87,41 @@ const create = async (req, res) => {
       cost_price = 0,
       sell_price = 0,
       note,
-      warehouse_id,
+      supplier_code = null,
+      supplier_name = null,
+      warehouse_id = null,
       location_text = "",
       quantity = 0,
       min_stock = 5,
     } = req.body;
     if (!barcode || !name)
       return R.badRequest(res, "Thiếu barcode hoặc tên sản phẩm");
-    if (!warehouse_id) return R.badRequest(res, "Thiếu warehouse_id");
-    if (!assertWarehouse(warehouse_id, req.user))
+    if (warehouse_id && !assertWarehouse(warehouse_id, req.user))
       return R.forbidden(
         res,
         "Bạn chỉ được thêm sản phẩm vào kho được phân công"
       );
     const [pResult] = await conn.execute(
-      `INSERT INTO products(barcode,name,unit,cost_price,sell_price,note)VALUES(?,?,?,?,?,?)`,
-      [barcode, name, unit, cost_price, sell_price, note || null]
+      `INSERT INTO products(barcode,name,unit,cost_price,sell_price,note,supplier_code,supplier_name)VALUES(?,?,?,?,?,?,?,?)`,
+      [barcode, name, unit, cost_price, sell_price, note || null, supplier_code, supplier_name]
     );
     const productId = pResult.insertId;
+
+    // Chỉ tạo dòng inventory nếu có chỉ định kho — cho phép tạo sản phẩm "trong danh mục" mà chưa gắn kho nào
+    if (warehouse_id) {
+      await conn.execute(
+        `INSERT INTO inventory(product_id,warehouse_id,location_text,quantity,min_stock,status)VALUES(?,?,?,?,?,?)`,
+        [
+          productId,
+          warehouse_id,
+          location_text,
+          quantity,
+          min_stock,
+          calcStatus(quantity, min_stock),
+        ]
+      );
+    }
+
     await conn.execute(
       `INSERT INTO inventory(product_id,warehouse_id,location_text,quantity,min_stock,status)VALUES(?,?,?,?,?,?)`,
       [
@@ -147,10 +167,10 @@ const update = async (req, res) => {
       );
       if (!inv) return R.forbidden(res, "Sản phẩm không thuộc kho của bạn");
     }
-    const { name, unit, cost_price, sell_price, note } = req.body;
+    const { name, unit, cost_price, sell_price, note, supplier_code, supplier_name } = req.body;
     const [result] = await db.execute(
-      `UPDATE products SET name=?,unit=?,cost_price=?,sell_price=?,note=? WHERE id=? AND is_active=1`,
-      [name, unit, cost_price, sell_price, note || null, id]
+      `UPDATE products SET name=?,unit=?,cost_price=?,sell_price=?,note=?,supplier_code=?,supplier_name=? WHERE id=? AND is_active=1`,
+      [name, unit, cost_price, sell_price, note || null, supplier_code || null, supplier_name || null, id]
     );
     if (!result.affectedRows) return R.notFound(res);
     await writeLog(db, req.user, "UPDATE", "product", id,

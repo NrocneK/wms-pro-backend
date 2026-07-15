@@ -108,22 +108,46 @@ const getDashboard = async (req, res) => {
   } catch (err) { return R.serverError(res, err); }
 };
 
+// Whitelist cột được phép sort — KHÔNG cho phép chuỗi tự do từ client ghép
+// thẳng vào ORDER BY, tránh SQL injection qua tên cột.
+const SORTABLE_COLUMNS = {
+  barcode: "barcode",
+  product_name: "product_name",
+  quantity: "quantity",
+  location: "location",
+  warehouse_code: "warehouse_code",
+  cost_price: "cost_price",
+  stock_value: "stock_value",
+};
+
 const getInventory = async (req, res) => {
   try {
-    const { search = "", warehouse_id = "", warehouse_code = "", status = "", page = 1, limit = 50 } = req.query;
+    const {
+      search = "", warehouse_id = "", warehouse_code = "", status = "",
+      location = "", page = 1, limit = 50,
+      sort_by = "product_name", sort_dir = "asc",
+    } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
     let where = "WHERE 1=1";
     if (search) { where += " AND (barcode LIKE ? OR product_name LIKE ?)"; params.push(`%${search}%`, `%${search}%`); }
+    if (location) { where += " AND location LIKE ?"; params.push(`%${location}%`); }
     const { whId, whClause, whParams } = warehouseGuard(req.user);
     if (whId) { where += whClause; params.push(...whParams); }
     else if (warehouse_code) { where += " AND warehouse_code=?"; params.push(warehouse_code); }
     else if (warehouse_id) { where += " AND warehouse_id=?"; params.push(warehouse_id); }
     if (status) { where += " AND status=?"; params.push(status); }
+
+    const sortCol = SORTABLE_COLUMNS[sort_by] || "product_name";
+    const sortDir = sort_dir.toLowerCase() === "desc" ? "DESC" : "ASC";
+
     const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM v_inventory_full ${where}`, params);
     const limitNum = parseInt(limit) || 50;
     const offsetNum = offset;
-    const [rows] = await db.execute(`SELECT * FROM v_inventory_full ${where} ORDER BY product_name LIMIT ${limitNum} OFFSET ${offsetNum}`, params);
+    const [rows] = await db.execute(
+      `SELECT * FROM v_inventory_full ${where} ORDER BY ${sortCol} ${sortDir}, product_name ASC LIMIT ${limitNum} OFFSET ${offsetNum}`,
+      params
+    );
     return R.ok(res, { items: rows, pagination: { total, page: parseInt(page), limit: parseInt(limit), totalPages: Math.ceil(total / limit) } });
   } catch (err) { return R.serverError(res, err); }
 };
@@ -381,13 +405,16 @@ const getOrdersByDate = async (req, res) => {
       LEFT JOIN users u ON u.id=CAST(io.created_by AS UNSIGNED)
       WHERE io.status='confirmed' AND io.import_date=? ${ioC}
       UNION ALL
-      SELECT eo.id AS order_id,'export' AS type,eo.ref_no,eo.export_date AS txn_date,eo.total_items,
+      SELECT eo.id AS order_id,'export' AS type,ei.ref_no,eo.export_date AS txn_date,
+             COUNT(ei.id) AS total_items,
              eo.confirmed_at,w.code AS warehouse_code,u.full_name AS created_by_name,
-             COALESCE((SELECT SUM(quantity*unit_price) FROM export_items WHERE export_order_id=eo.id),0) AS total_value
+             COALESCE(SUM(ei.quantity*ei.unit_price),0) AS total_value
       FROM export_orders eo
+      JOIN export_items ei ON ei.export_order_id=eo.id
       JOIN warehouses w ON w.id=eo.warehouse_id
       LEFT JOIN users u ON u.id=CAST(eo.created_by AS UNSIGNED)
       WHERE eo.status='confirmed' AND eo.export_date=? ${eoC}
+      GROUP BY eo.id, ei.ref_no
       ORDER BY txn_date DESC`,
       [date, ...ioP, date, ...eoP]
     );
