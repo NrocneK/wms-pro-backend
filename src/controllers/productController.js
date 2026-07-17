@@ -1,7 +1,7 @@
 "use strict";
 const db = require("../config/db");
 const R = require("../utils/response");
-const { warehouseGuard, assertWarehouse } = require("../utils/warehouseGuard");
+const { warehouseGuard, assertWarehouse } = require("../middleware/warehouseGuard");
 const { writeLog } = require("../utils/auditLog");
 
 const calcStatus = (qty, min = 5) =>

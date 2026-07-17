@@ -1,4 +1,4 @@
-// src/utils/warehouseGuard.js
+// src/middleware/warehouseGuard.js
 "use strict";
 
 const warehouseGuard = (user, colName = "warehouse_id") => {

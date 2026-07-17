@@ -4,7 +4,7 @@ const { writeLog } = require("../utils/auditLog");
 const db = require("../config/db");
 const R = require("../utils/response");
 const XLSX = require("xlsx");
-const { warehouseGuard, assertWarehouse } = require("../utils/warehouseGuard");
+const { warehouseGuard, assertWarehouse } = require("../middleware/warehouseGuard");
 const calcStatus = (qty, min = 5) =>
   qty === 0 ? "zero" : qty <= min ? "low" : qty <= min * 2 ? "warning" : "ok";
 const parseDate = (v) => {

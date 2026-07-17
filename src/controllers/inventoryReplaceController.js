@@ -4,7 +4,7 @@ const { writeLog } = require("../utils/auditLog");
 const db = require("../config/db");
 const R = require("../utils/response");
 const XLSX = require("xlsx");
-const { assertWarehouse } = require("../utils/warehouseGuard");
+const { assertWarehouse } = require("../middleware/warehouseGuard");
 const calcStatus = (qty, min = 5) =>
   qty === 0 ? "zero" : qty <= min ? "low" : qty <= min * 2 ? "warning" : "ok";
 
@@ -19,7 +19,7 @@ const importReplace = async (req, res) => {
     if (!dataRows.length)
       return R.badRequest(res, "File không có dữ liệu hợp lệ");
 
-    const rows = dataRows.map((r) => ({
+    const rawRows = dataRows.map(r => ({
       barcode: String(r[0]).trim(),
       name: String(r[1] || "").trim(),
       quantity: Number(r[2]) || 0,
@@ -27,7 +27,19 @@ const importReplace = async (req, res) => {
       whCode: String(r[4] || "X1").trim(),
       cost_price: Number(r[5]) || 0,
     }));
-    const whCodes = [...new Set(rows.map((r) => r.whCode))];
+
+    // Loại bỏ trùng lặp theo cặp (barcode, kho) — nếu file Excel chứa cùng 1 barcode
+    // nhiều lần cho cùng 1 kho, GIỮ DÒNG CUỐI CÙNG (coi như bản cập nhật mới nhất
+    // ghi đè bản cũ), tránh lỗi ER_DUP_ENTRY khi insert hàng loạt vào bảng inventory
+    // (khác với products dùng ON DUPLICATE KEY UPDATE nên không bị lỗi này).
+    const dedupMap = new Map();
+    for (const row of rawRows) {
+      dedupMap.set(`${row.barcode}__${row.whCode}`, row);
+    }
+    const rows = [...dedupMap.values()];
+    const skippedDuplicates = rawRows.length - rows.length;
+
+    const whCodes = [...new Set(rows.map(r => r.whCode))];
 
     // Kiểm tra quyền kho
     if (req.user.warehouse_id) {
@@ -119,21 +131,14 @@ const importReplace = async (req, res) => {
     }
 
     await conn.commit();
-    await writeLog(
-      conn,
-      req.user,
-      "REPLACE",
-      "inventory",
-      null,
-      `Cập nhật toàn bộ tồn kho: ${insertedCount} sản phẩm tại kho ${whCodes.join(
-        ", "
-      )}`
-    );
-    return R.ok(
-      res,
-      { total_rows: rows.length, inserted: insertedCount, warehouses: whCodes },
-      `Đã thay thế tồn kho: ${insertedCount} sản phẩm`
-    );
+    await writeLog(conn, req.user, "REPLACE", "inventory", null,
+      `Cập nhật toàn bộ tồn kho: ${insertedCount} sản phẩm tại kho ${whCodes.join(", ")}${skippedDuplicates > 0 ? ` (loại bỏ ${skippedDuplicates} dòng trùng barcode)` : ""}`);
+    return R.ok(res, {
+      total_rows: rows.length,
+      inserted: insertedCount,
+      warehouses: whCodes,
+      skipped_duplicates: skippedDuplicates,
+    }, `Đã thay thế tồn kho: ${insertedCount} sản phẩm${skippedDuplicates > 0 ? ` (đã tự động loại bỏ ${skippedDuplicates} dòng trùng barcode trong file)` : ""}`);
   } catch (err) {
     await conn.rollback();
     return R.serverError(res, err);
@@ -151,7 +156,8 @@ const previewReplace = async (req, res) => {
     const dataRows = raw.slice(1).filter((r) => String(r[0]).trim());
     if (!dataRows.length)
       return R.badRequest(res, "File không có dữ liệu hợp lệ");
-    const rows = dataRows.map((r) => ({
+
+    const rawRows = dataRows.map(r => ({
       barcode: String(r[0]).trim(),
       name: String(r[1] || "").trim(),
       quantity: Number(r[2]) || 0,
@@ -159,18 +165,25 @@ const previewReplace = async (req, res) => {
       warehouse: String(r[4] || "X1").trim(),
       cost_price: Number(r[5]) || 0,
     }));
-    const warehouses = [...new Set(rows.map((r) => r.warehouse))];
-    const zeroQty = rows.filter((r) => r.quantity === 0).length;
-    const noLocation = rows.filter((r) => !r.location).length;
+
+    const seenKeys = new Set();
+    let duplicateCount = 0;
+    for (const r of rawRows) {
+      const key = `${r.barcode}__${r.warehouse}`;
+      if (seenKeys.has(key)) duplicateCount++;
+      seenKeys.add(key);
+    }
+    const rows = rawRows; // preview vẫn hiển thị đúng số dòng thật có trong file, chỉ cảnh báo thêm
+
+    const warehouses = [...new Set(rows.map(r => r.warehouse))];
+    const zeroQty = rows.filter(r => r.quantity === 0).length;
+    const noLocation = rows.filter(r => !r.location).length;
     const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
     const totalValue = rows.reduce((s, r) => s + r.quantity * r.cost_price, 0);
     return R.ok(res, {
       total_rows: rows.length,
-      warehouses,
-      zero_qty: zeroQty,
-      no_location: noLocation,
-      total_qty: totalQty,
-      total_value: totalValue,
+      warehouses, zero_qty: zeroQty, no_location: noLocation, total_qty: totalQty, total_value: totalValue,
+      duplicate_count: duplicateCount,
       sample: rows.slice(0, 5),
     });
   } catch (err) {

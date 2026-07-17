@@ -2,7 +2,7 @@
 "use strict";
 const db = require("../config/db");
 const R = require("../utils/response");
-const { warehouseGuard, assertWarehouse } = require("../utils/warehouseGuard");
+const { warehouseGuard, assertWarehouse } = require("../middleware/warehouseGuard");
 const { writeLog } = require("../utils/auditLog");
 
 const getDashboard = async (req, res) => {
@@ -35,17 +35,18 @@ const getDashboard = async (req, res) => {
         (SELECT COUNT(*) FROM export_orders WHERE status='confirmed' AND export_date=? ${whIO}) AS today_exports
     `, [todayStr, ...whParams, todayStr, ...whParams]);
 
-    // ── Cửa sổ 7 ngày trượt được ─────────────────────────────
-    // week_offset=0 → 7 ngày gần nhất, week_offset=1 → 7 ngày liền trước, v.v.
+    // ── Cửa sổ 14 ngày trượt được ─────────────────────────────
+    // week_offset=0 → 14 ngày gần nhất, week_offset=1 → 14 ngày liền trước, v.v.
     // Tính range_start/range_end trực tiếp trong JS (không qua MySQL) — cùng lý
     // do tránh lệch timezone như trên, đồng thời bớt 1 lượt round-trip DB thừa.
+    const WINDOW_DAYS = 14;
     const weekOffset = Math.max(0, parseInt(req.query.week_offset) || 0);
     const rangeEndDate = new Date(now);
-    rangeEndDate.setDate(rangeEndDate.getDate() - weekOffset * 7);
+    rangeEndDate.setDate(rangeEndDate.getDate() - weekOffset * WINDOW_DAYS);
 
     const range_end = `${rangeEndDate.getFullYear()}-${String(rangeEndDate.getMonth() + 1).padStart(2, "0")}-${String(rangeEndDate.getDate()).padStart(2, "0")}`;
     const rangeStartDate = new Date(rangeEndDate);
-    rangeStartDate.setDate(rangeStartDate.getDate() - 6);
+    rangeStartDate.setDate(rangeStartDate.getDate() - (WINDOW_DAYS - 1));
     const range_start = `${rangeStartDate.getFullYear()}-${String(rangeStartDate.getMonth() + 1).padStart(2, "0")}-${String(rangeStartDate.getDate()).padStart(2, "0")}`;
 
     // Biểu đồ theo GIÁ TRỊ (quantity × unit_price) thay vì đếm số phiếu
@@ -108,8 +109,6 @@ const getDashboard = async (req, res) => {
   } catch (err) { return R.serverError(res, err); }
 };
 
-// Whitelist cột được phép sort — KHÔNG cho phép chuỗi tự do từ client ghép
-// thẳng vào ORDER BY, tránh SQL injection qua tên cột.
 const SORTABLE_COLUMNS = {
   barcode: "barcode",
   product_name: "product_name",
@@ -118,6 +117,23 @@ const SORTABLE_COLUMNS = {
   warehouse_code: "warehouse_code",
   cost_price: "cost_price",
   stock_value: "stock_value",
+};
+
+// Vị trí kho là chuỗi hỗn hợp (thuần số "1200" hoặc chữ+số "A12") — sort chuỗi
+// mặc định của MySQL so sánh ký tự-theo-ký tự nên "11" < "2" (sai tự nhiên).
+// Cách khắc phục: nhóm ưu tiên "toàn số" lên trước, ép kiểu số để so sánh đúng
+// giá trị; nhóm còn lại (có chữ) giữ nguyên sort chuỗi thông thường.
+const buildOrderClause = (sortBy, sortDir) => {
+  const dir = sortDir.toLowerCase() === "desc" ? "DESC" : "ASC";
+  if (sortBy === "location") {
+    return `
+      CASE WHEN location REGEXP '^[0-9]+$' THEN 0 ELSE 1 END ${dir},
+      CASE WHEN location REGEXP '^[0-9]+$' THEN CAST(location AS UNSIGNED) END ${dir},
+      location ${dir}
+    `;
+  }
+  const col = SORTABLE_COLUMNS[sortBy] || "product_name";
+  return `${col} ${dir}, product_name ASC`;
 };
 
 const getInventory = async (req, res) => {
@@ -131,21 +147,20 @@ const getInventory = async (req, res) => {
     const params = [];
     let where = "WHERE 1=1";
     if (search) { where += " AND (barcode LIKE ? OR product_name LIKE ?)"; params.push(`%${search}%`, `%${search}%`); }
-    if (location) { where += " AND location LIKE ?"; params.push(`%${location}%`); }
+    if (location) { where += " AND location = ?"; params.push(location); }
     const { whId, whClause, whParams } = warehouseGuard(req.user);
     if (whId) { where += whClause; params.push(...whParams); }
     else if (warehouse_code) { where += " AND warehouse_code=?"; params.push(warehouse_code); }
     else if (warehouse_id) { where += " AND warehouse_id=?"; params.push(warehouse_id); }
     if (status) { where += " AND status=?"; params.push(status); }
 
-    const sortCol = SORTABLE_COLUMNS[sort_by] || "product_name";
-    const sortDir = sort_dir.toLowerCase() === "desc" ? "DESC" : "ASC";
+    const orderClause = buildOrderClause(sort_by, sort_dir);
 
     const [[{ total }]] = await db.execute(`SELECT COUNT(*) AS total FROM v_inventory_full ${where}`, params);
     const limitNum = parseInt(limit) || 50;
     const offsetNum = offset;
     const [rows] = await db.execute(
-      `SELECT * FROM v_inventory_full ${where} ORDER BY ${sortCol} ${sortDir}, product_name ASC LIMIT ${limitNum} OFFSET ${offsetNum}`,
+      `SELECT * FROM v_inventory_full ${where} ORDER BY ${orderClause} LIMIT ${limitNum} OFFSET ${offsetNum}`,
       params
     );
     return R.ok(res, { items: rows, pagination: { total, page: parseInt(page), limit: parseInt(limit), totalPages: Math.ceil(total / limit) } });
@@ -423,4 +438,35 @@ const getOrdersByDate = async (req, res) => {
   } catch (err) { return R.serverError(res, err); }
 };
 
-module.exports = { getDashboard, getInventory, getAlerts, getReportByCategory, getReportUserActivity, createInventoryItem, updateInventoryItem, removeInventoryItem, removeBatchInventory, getActivityHistoryDates, getOrdersByDate };
+/* Cấp 3 (Dashboard):
+ * Lấy danh sách sản phẩm của 1 "mã phiếu" (ref_no) trong 1 phiếu xuất đã confirmed.
+ * Dùng cho Dashboard khi mở rộng 1 dòng trong "Lịch sử giao dịch".
+ * Khác getTicketItems (exportController): hàm đó chỉ cho phiếu đang ở trạng thái
+ * 'packing', còn hàm này dùng cho phiếu đã 'confirmed' — không giới hạn status.
+ */
+const getExportItemsByRefNo = async (req, res) => {
+  try {
+    const { order_id, ref_no } = req.query;
+    if (!order_id || !ref_no) return R.badRequest(res, "Thiếu tham số order_id hoặc ref_no");
+
+    const { whClause, whParams } = warehouseGuard(req.user, "eo.warehouse_id");
+    const [[order]] = await db.execute(
+      `SELECT eo.id, eo.warehouse_id FROM export_orders eo WHERE eo.id=? ${whClause}`,
+      [order_id, ...whParams]
+    );
+    if (!order) return R.notFound(res, "Không tìm thấy phiếu xuất hoặc bạn không có quyền");
+
+    const [items] = await db.execute(
+      `SELECT ei.*, p.barcode, p.name AS product_name, inv.quantity AS current_stock
+       FROM export_items ei
+       JOIN products p ON p.id=ei.product_id
+       LEFT JOIN inventory inv ON inv.product_id=ei.product_id AND inv.warehouse_id=?
+       WHERE ei.export_order_id=? AND ei.ref_no=?
+       ORDER BY ei.id`,
+      [order.warehouse_id, order.id, ref_no]
+    );
+    return R.ok(res, items);
+  } catch (err) { return R.serverError(res, err); }
+};
+
+module.exports = { getDashboard, getInventory, getAlerts, getReportByCategory, getReportUserActivity, createInventoryItem, updateInventoryItem, removeInventoryItem, removeBatchInventory, getActivityHistoryDates, getOrdersByDate, getExportItemsByRefNo };
