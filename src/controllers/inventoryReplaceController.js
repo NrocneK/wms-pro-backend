@@ -166,13 +166,21 @@ const previewReplace = async (req, res) => {
       cost_price: Number(r[5]) || 0,
     }));
 
-    const seenKeys = new Set();
-    let duplicateCount = 0;
+    // Đếm số lần xuất hiện của từng cặp (barcode, kho) để phát hiện trùng lặp.
+    // Khi importReplace() chạy thật, mỗi cặp trùng sẽ chỉ giữ lại DÒNG CUỐI CÙNG
+    // trong file — nên ở đây cần liệt kê rõ những mã nào bị trùng để người dùng
+    // biết trước, tránh mất dữ liệu ngoài ý muốn mà không hay.
+    const countByKey = new Map(); // key = "barcode__warehouse" -> { barcode, warehouse, count }
     for (const r of rawRows) {
       const key = `${r.barcode}__${r.warehouse}`;
-      if (seenKeys.has(key)) duplicateCount++;
-      seenKeys.add(key);
+      const cur = countByKey.get(key);
+      if (cur) cur.count++;
+      else countByKey.set(key, { barcode: r.barcode, warehouse: r.warehouse, count: 1 });
     }
+    const duplicates = [...countByKey.values()]
+      .filter(d => d.count > 1)
+      .sort((a, b) => b.count - a.count);
+    const duplicateCount = duplicates.reduce((s, d) => s + (d.count - 1), 0);
     const rows = rawRows; // preview vẫn hiển thị đúng số dòng thật có trong file, chỉ cảnh báo thêm
 
     const warehouses = [...new Set(rows.map(r => r.warehouse))];
@@ -184,6 +192,10 @@ const previewReplace = async (req, res) => {
       total_rows: rows.length,
       warehouses, zero_qty: zeroQty, no_location: noLocation, total_qty: totalQty, total_value: totalValue,
       duplicate_count: duplicateCount,
+      // Giới hạn 50 mã đầu để tránh payload quá lớn khi file có hàng nghìn dòng trùng;
+      // vẫn giữ đủ duplicate_count (tổng thật) để hiển thị số liệu chính xác.
+      duplicates: duplicates.slice(0, 50),
+      duplicates_truncated: duplicates.length > 50,
       sample: rows.slice(0, 5),
     });
   } catch (err) {
