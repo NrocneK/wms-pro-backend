@@ -250,7 +250,7 @@ const confirm = async (req, res) => {
     );
     await conn.commit();
     await writeLog(db, req.user, "CONFIRM", "import_order", order.id,
-      `Xác nhận nhập kho phiếu ${order.ref_no} (${items.length} dòng)`);
+      `Xác nhận nhập kho phiếu ${order.ref_no} (${items.length} dòng)`, order.warehouse_id);
     return R.ok(res, {}, "Xác nhận nhập kho thành công");
   } catch (err) {
     await conn.rollback();

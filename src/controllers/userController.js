@@ -31,7 +31,7 @@ const create = async (req, res) => {
     const [result] = await conn.execute(`INSERT INTO users(username,password_hash,full_name,role,warehouse_id)VALUES(?,?,?,?,?)`, [username, hash, full_name, role, warehouse_id]);
     await conn.commit();
     await writeLog(conn, req.user, "CREATE", "user", result.insertId,
-      `Tạo tài khoản: ${username} (${role})`);
+      `Tạo tài khoản: ${username} (${role})`, warehouse_id);
     return R.created(res, { id: result.insertId, username, full_name, role, warehouse_id, warehouse_code: warehouse_code || null }, "Tạo tài khoản thành công");
   } catch (err) { await conn.rollback(); if (err.code === "ER_DUP_ENTRY") return R.badRequest(res, `Username "${req.body.username}" đã tồn tại`); return R.serverError(res, err); }
   finally { conn.release(); }
@@ -48,7 +48,7 @@ const update = async (req, res) => {
     await conn.execute(`UPDATE users SET full_name=?,role=?,warehouse_id=?,is_active=? WHERE id=?`, [full_name, role, warehouse_id, is_active ? 1 : 0, id]);
     await conn.commit();
     await writeLog(conn, req.user, "UPDATE", "user", id,
-      `Cập nhật tài khoản id=${id}: role=${role}, is_active=${is_active ? 1 : 0}`);
+      `Cập nhật tài khoản id=${id}: role=${role}, is_active=${is_active ? 1 : 0}`, warehouse_id);
     return R.ok(res, { warehouse_id, warehouse_code: warehouse_code || null }, "Cập nhật thành công");
   } catch (err) { await conn.rollback(); return R.serverError(res, err); }
   finally { conn.release(); }

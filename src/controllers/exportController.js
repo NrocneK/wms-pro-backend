@@ -223,7 +223,7 @@ const confirm = async (req, res) => {
     );
     await conn.commit();
     await writeLog(db, req.user, "CONFIRM", "export_order", order.id,
-      `Xác nhận xuất kho phiếu ${order.ref_no} (${items.length - skipped} dòng thành công)`);
+      `Xác nhận xuất kho phiếu ${order.ref_no} (${items.length - skipped} dòng thành công)`, order.warehouse_id);
     return R.ok(res, { skipped_rows: skipped }, "Xuất kho thành công");
   } catch (err) {
     await conn.rollback();
@@ -334,7 +334,7 @@ const cancelBatch = async (req, res) => {
     await conn.execute("DELETE FROM export_items WHERE export_order_id=?", [order.id]);
     await conn.execute("DELETE FROM export_orders WHERE id=?", [order.id]);
     await conn.commit();
-    await writeLog(db, req.user, "DELETE", "export_order", order.id, `Hủy phiếu đang soạn hàng ${order.ref_no}`);
+    await writeLog(db, req.user, "DELETE", "export_order", order.id, `Hủy phiếu đang soạn hàng ${order.ref_no}`, order.warehouse_id);
     return R.ok(res, {}, "Đã hủy phiếu");
   } catch (err) {
     await conn.rollback();

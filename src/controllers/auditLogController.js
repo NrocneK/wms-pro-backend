@@ -3,9 +3,16 @@
 
 const db = require("../config/db");
 const R = require("../utils/response");
+const { warehouseGuard } = require("../middleware/warehouseGuard");
 
 /**
  * Lấy danh sách audit log, có phân trang + lọc theo entity/action
+ * + lọc theo quyền kho (manager chỉ thấy log của kho mình phụ trách;
+ *   admin không bị lọc kho vì req.user.warehouse_id = null).
+ * Các log có warehouse_id=NULL (hành động không thuộc 1 kho cụ thể, vd:
+ * quản lý user, sửa product catalog) SẼ BỊ ẨN khỏi manager có giới hạn kho
+ * — vì không thể xác định log đó có thuộc phạm vi của họ hay không, ẩn đi
+ * là lựa chọn an toàn hơn hiển thị nhầm.
  * LƯU Ý: MySQL 8.4 + mysql2 không nhận placeholder (?) cho LIMIT/OFFSET
  * → phải inline trực tiếp sau khi ép kiểu Number, KHÔNG truyền qua params
  */
@@ -16,8 +23,9 @@ const getAll = async (req, res) => {
         const safePage = Math.max(1, parseInt(page) || 1);
         const offset = (safePage - 1) * safeLimit;
 
-        const params = [];
-        let where = "WHERE 1=1";
+        const { whClause, whParams } = warehouseGuard(req.user, "warehouse_id");
+        const params = [...whParams];
+        let where = "WHERE 1=1" + whClause;
         if (entity) { where += " AND entity=?"; params.push(entity); }
         if (action) { where += " AND action=?"; params.push(action); }
 

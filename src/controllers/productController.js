@@ -122,25 +122,16 @@ const create = async (req, res) => {
       );
     }
 
-    await conn.execute(
-      `INSERT INTO inventory(product_id,warehouse_id,location_text,quantity,min_stock,status)VALUES(?,?,?,?,?,?)`,
-      [
-        productId,
-        warehouse_id,
-        location_text,
-        quantity,
-        min_stock,
-        calcStatus(quantity, min_stock),
-      ]
-    );
     await conn.commit();
+
     await writeLog(
       db,
       req.user,
       "CREATE",
       "product",
       productId,
-      `Thêm sản phẩm mới: ${name} (${barcode})`
+      `Thêm sản phẩm mới: ${name} (${barcode})`,
+      warehouse_id // null nếu chỉ tạo trong danh mục, chưa gắn kho nào
     );
     return R.created(
       res,
@@ -173,8 +164,11 @@ const update = async (req, res) => {
       [name, unit, cost_price, sell_price, note || null, supplier_code || null, supplier_name || null, id]
     );
     if (!result.affectedRows) return R.notFound(res);
+
+    // Không truyền warehouseId — product là catalog-level, không thuộc 1 kho cụ thể
     await writeLog(db, req.user, "UPDATE", "product", id,
       `Cập nhật sản phẩm id=${id}: ${req.body.name}`);
+
     return R.ok(res, {}, "Cập nhật thành công");
   } catch (err) {
     return R.serverError(res, err);
@@ -186,6 +180,7 @@ const remove = async (req, res) => {
     await db.execute("UPDATE products SET is_active=0 WHERE id=?", [
       req.params.id,
     ]);
+    // Không truyền warehouseId — product là catalog-level, không thuộc 1 kho cụ thể
     await writeLog(db, req.user, "DELETE", "product", req.params.id,
       `Xóa sản phẩm id=${req.params.id}`);
     return R.ok(res, {}, "Đã xóa sản phẩm");

@@ -196,6 +196,12 @@ CREATE TABLE audit_logs (
   INDEX idx_created (created_at)
 ) ENGINE=InnoDB;
 
+ALTER TABLE audit_logs
+  ADD COLUMN warehouse_id INT UNSIGNED DEFAULT NULL AFTER user_id,
+  ADD INDEX idx_warehouse (warehouse_id),
+  ADD CONSTRAINT fk_audit_logs_warehouse
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE SET NULL;
+    
 -- ─────────────────────────────────────────────
 -- VIEW: tồn kho đầy đủ
 -- ─────────────────────────────────────────────

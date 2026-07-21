@@ -273,7 +273,7 @@ const createInventoryItem = async (req, res) => {
     );
     await conn.commit();
     await writeLog(db, req.user, "CREATE", "inventory", product.id,
-      `Thêm mới sản phẩm "${name}" (${barcode}) vào kho ${warehouse_code}, SL: ${qty}`);
+      `Thêm mới sản phẩm "${name}" (${barcode}) vào kho ${warehouse_code}, SL: ${qty}`, wh.id);
     return R.created(res, {});
   } catch (err) {
     await conn.rollback();
@@ -300,7 +300,7 @@ const updateInventoryItem = async (req, res) => {
     );
     await conn.commit();
     await writeLog(db, req.user, "UPDATE", "inventory", req.params.id,
-      `Cập nhật sản phẩm "${name}" (id tồn kho=${req.params.id}): giá vốn=${cost_price}, giá bán=${sell_price}, tồn tối thiểu=${min_stock}, vị trí=${location_text || "—"}`);
+      `Cập nhật sản phẩm "${name}" (id tồn kho=${req.params.id}): giá vốn=${cost_price}, giá bán=${sell_price}, tồn tối thiểu=${min_stock}, vị trí=${location_text || "—"}`, inv.warehouse_id);
     return R.ok(res, {});
 
   } catch (err) {
@@ -320,7 +320,7 @@ const removeInventoryItem = async (req, res) => {
     if (!assertWarehouse(inv.warehouse_id, req.user)) return R.forbidden(res, "Bạn không có quyền xóa ở kho này");
     await db.execute("DELETE FROM inventory WHERE id=?", [req.params.id]);
     await writeLog(db, req.user, "DELETE", "inventory", req.params.id,
-      `Xóa sản phẩm "${inv.product_name}" (${inv.barcode}) khỏi kho`);
+      `Xóa sản phẩm "${inv.product_name}" (${inv.barcode}) khỏi kho`, inv.warehouse_id);
     return R.ok(res, {});
   } catch (err) { return R.serverError(res, err); }
 };
@@ -347,8 +347,10 @@ const removeBatchInventory = async (req, res) => {
       `DELETE FROM inventory WHERE id IN (${ids.map(() => "?").join(",")})`,
       ids
     );
+    const batchWarehouseId = invRows.length > 0 && invRows.every(i => i.warehouse_id === invRows[0].warehouse_id)
+      ? invRows[0].warehouse_id : null; // null nếu batch gồm nhiều kho khác nhau (chỉ admin mới làm được việc này)
     await writeLog(db, req.user, "DELETE", "inventory", null,
-      `Xóa hàng loạt ${result.affectedRows} sản phẩm: ${invRows.map(i => i.barcode).join(", ")}`);
+      `Xóa hàng loạt ${result.affectedRows} sản phẩm: ${invRows.map(i => i.barcode).join(", ")}`, batchWarehouseId);
     return R.ok(res, { deleted: result.affectedRows });
   } catch (err) { return R.serverError(res, err); }
 };

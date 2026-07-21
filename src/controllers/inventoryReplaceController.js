@@ -131,6 +131,10 @@ const importReplace = async (req, res) => {
     }
 
     await conn.commit();
+    // Không truyền warehouseId — thao tác REPLACE có thể ghi đè NHIỀU kho
+    // cùng lúc (xem whCodes), không có 1 warehouse_id đơn lẻ để gán.
+    // → log này mặc định warehouse_id=NULL, chỉ admin (không bị lọc theo
+    // kho) mới thấy được trong danh sách nhật ký.
     await writeLog(conn, req.user, "REPLACE", "inventory", null,
       `Cập nhật toàn bộ tồn kho: ${insertedCount} sản phẩm tại kho ${whCodes.join(", ")}${skippedDuplicates > 0 ? ` (loại bỏ ${skippedDuplicates} dòng trùng barcode)` : ""}`);
     return R.ok(res, {
