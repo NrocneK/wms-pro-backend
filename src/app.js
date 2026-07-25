@@ -73,14 +73,5 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ─────────────────────────────────────────────
-// START
-// ─────────────────────────────────────────────
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`\n🚀 WMS Pro API đang chạy trên port ${PORT}`);
-  console.log(`   Môi trường : ${process.env.NODE_ENV || "development"}`);
-  console.log(`   Health check: http://localhost:${PORT}/health`);
-  console.log(`   API base    : http://localhost:${PORT}/api/v1\n`);
-});
 
 module.exports = app;

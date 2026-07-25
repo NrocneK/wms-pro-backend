@@ -4,8 +4,8 @@
   "description": "WMS Pro — Warehouse Management System Backend API",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
     "migrate": "node src/config/migrate.js",
      "test": "cross-env NODE_ENV=test vitest run",
     "test:watch": "cross-env NODE_ENV=test vitest"
