@@ -32,7 +32,11 @@ pool.getConnection()
   })
   .catch(err => {
     console.error("❌ MySQL connection failed:", err.message);
-    process.exit(1);   // dừng server nếu không kết nối được DB
+    // Khi chạy test (NODE_ENV=test), KHÔNG process.exit — để lỗi kết nối
+    // hiện ra như 1 test fail bình thường, dễ đọc, thay vì giết cả tiến
+    // trình Node đang chạy test. Ở production/dev, giữ nguyên hành vi cũ:
+    // dừng server ngay nếu không kết nối được DB (fail-fast).
+    if (process.env.NODE_ENV !== "test") process.exit(1);
   });
 
 module.exports = pool;

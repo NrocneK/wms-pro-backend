@@ -3,16 +3,16 @@
 "use strict";
 
 require("dotenv").config();
-const express     = require("express");
-const cors        = require("cors");
-const helmet      = require("helmet");
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
 const compression = require("compression");
-const morgan      = require("morgan");
-const rateLimit   = require("express-rate-limit");
+const morgan = require("morgan");
+const rateLimit = require("express-rate-limit");
 
 const routes = require("./routes");
 
-const app  = express();
+const app = express();
 const PORT = parseInt(process.env.PORT) || 3001;
 
 // ─────────────────────────────────────────────
@@ -28,16 +28,16 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
     cb(new Error(`CORS blocked: ${origin}`));
   },
-  methods:     ["GET","POST","PUT","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 }));
 
 // Rate limiting
 app.use(rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max:      parseInt(process.env.RATE_LIMIT_MAX)        || 500,
-  message:  { success: false, message: "Quá nhiều yêu cầu, vui lòng thử lại sau" },
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 500,
+  message: { success: false, message: "Quá nhiều yêu cầu, vui lòng thử lại sau" },
 }));
 
 // Logging
@@ -55,9 +55,9 @@ app.use("/api/v1", routes);
 // Health check
 app.get("/health", (req, res) => res.json({
   status: "ok",
-  app:    "WMS Pro API",
-  version:"1.0.0",
-  time:   new Date().toISOString(),
+  app: "WMS Pro API",
+  version: "1.0.0",
+  time: new Date().toISOString(),
 }));
 
 // 404 handler
