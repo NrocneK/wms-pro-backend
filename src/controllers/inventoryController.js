@@ -147,7 +147,7 @@ const getInventory = async (req, res) => {
     const params = [];
     let where = "WHERE 1=1";
     if (search) { where += " AND (barcode LIKE ? OR product_name LIKE ?)"; params.push(`%${search}%`, `%${search}%`); }
-    if (location) { where += " AND location = ?"; params.push(location); }
+    if (location) { where += " AND location LIKE ?"; params.push(`${location}%`); }
     const { whId, whClause, whParams } = warehouseGuard(req.user);
     if (whId) { where += whClause; params.push(...whParams); }
     else if (warehouse_code) { where += " AND warehouse_code=?"; params.push(warehouse_code); }
