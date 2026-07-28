@@ -1,110 +1,177 @@
-# WMS Pro — Backend
+# WMS Pro — Warehouse Management System (Backend)
 
-API backend cho hệ thống quản lý kho (Warehouse Management System) dành cho nghiệp vụ nhà sách/xuất bản — quản lý tồn kho đa kho, phiếu nhập/xuất, phân quyền theo vai trò và theo kho, nhật ký thao tác, xuất phiếu tìm hàng PDF.
+> REST API backend for WMS Pro — a professional warehouse management system built for bookstore & publishing operations.
 
-Đây là backend cho [wms-pro-frontend](https://github.com/NrocneK/wms-pro-frontend).
+![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js)
+![Express](https://img.shields.io/badge/Express-4-000000?logo=express)
+![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql)
+![JWT](https://img.shields.io/badge/Auth-JWT-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-## Công nghệ sử dụng
+**Frontend Repo:** [wms-pro-frontend](https://github.com/NrocneK/wms-pro-frontend)
+**Deployed on:** Render (API) + Aiven MySQL (Database)
 
-- **Node.js** + **Express** — REST API
-- **MySQL** (qua `mysql2`) — cơ sở dữ liệu, triển khai trên [Aiven](https://aiven.io) (production) hoặc XAMPP (local)
-- **JWT** (`jsonwebtoken`) — xác thực, có access token + refresh token
-- **bcryptjs** — mã hóa mật khẩu
-- **multer** + **xlsx** — nhận & xử lý file Excel (nhập/xuất kho, đồng bộ tồn kho hàng loạt)
-- **helmet**, **cors**, **express-rate-limit**, **compression** — bảo mật & tối ưu tầng HTTP
+---
 
-## Cấu trúc thư mục
+## ✨ Features
+
+- **JWT Authentication** — access token + refresh token rotation
+- **Role & Warehouse-based Authorization** — Admin (global) vs Warehouse Keeper (scoped)
+- **Inventory Management** — multi-warehouse stock tracking, real-time levels
+- **Import / Export** — Excel file processing via SheetJS (multer + xlsx)
+- **Picking Slip Generation** — outbound order management
+- **Audit Log** — every write operation is logged with user, timestamp, action
+- **Security** — helmet, CORS, rate limiting, bcryptjs password hashing, compression
+
+---
+
+## 🛠️ Tech Stack
+
+| Category         | Technology                       |
+| ---------------- | -------------------------------- |
+| Runtime          | Node.js 18+                      |
+| Framework        | Express 4                        |
+| Database         | MySQL 8 (via mysql2)             |
+| ORM/Query        | Raw SQL + mysql2                 |
+| Auth             | JWT (access + refresh tokens)    |
+| Password         | bcryptjs                         |
+| File Upload      | multer                           |
+| Excel Processing | SheetJS (xlsx)                   |
+| Security         | helmet, cors, express-rate-limit |
+| Compression      | compression                      |
+
+---
+
+## 🏗️ Architecture
+
+```
+Client (React Frontend)
+        │
+        ▼
+   Express App (app.js)
+        │
+   ┌────┴────────────────────────────┐
+   │  Middleware Stack               │
+   │  helmet · cors · rate-limit     │
+   │  compression · json-parser      │
+   └────┬────────────────────────────┘
+        │
+   Auth Middleware (JWT verify)
+        │
+   ┌────┴────────────────────────────┐
+   │  Routes                         │
+   │  /auth    /users    /inventory  │
+   │  /import  /export   /audit-log  │
+   │  /picking /warehouses           │
+   └────┬────────────────────────────┘
+        │
+   MySQL (Aiven Cloud)
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js >= 18
+- MySQL 8 (local via XAMPP, or cloud via Aiven)
+
+### Installation
+
+```bash
+# Clone the repo
+git clone https://github.com/NrocneK/wms-pro-backend.git
+cd wms-pro-backend
+
+# Install dependencies
+npm install
+
+# Set up environment variables
+cp .env.example .env
+
+# Run database migrations (see /sql folder)
+# Import the SQL schema file into your MySQL instance
+
+# Start development server
+npm run dev
+```
+
+---
+
+## ⚙️ Environment Variables
+
+```env
+# Server
+PORT=5000
+NODE_ENV=development
+
+# Database
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=your_password
+DB_NAME=wms_pro
+
+# JWT
+JWT_SECRET=your_jwt_secret_key
+JWT_REFRESH_SECRET=your_refresh_secret_key
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=7d
+
+# CORS
+ALLOWED_ORIGIN=http://localhost:5173
+```
+
+---
+
+## 📁 Project Structure
 
 ```
 src/
-├── app.js                  # Entry point — khởi tạo Express, middleware bảo mật
+├── app.js                  # Entry point — Express setup, middleware
 ├── config/
-│   └── db.js                # Kết nối pool MySQL
-├── controllers/              # Logic xử lý theo domain (auth, product, inventory, import, export, user, warehouse, auditLog)
+│   └── db.js               # MySQL connection pool
 ├── middleware/
-│   ├── auth.js                # Xác thực JWT + phân quyền theo role
-│   ├── warehouseGuard.js      # Giới hạn truy vấn theo kho được gán cho user
-│   └── uploadExcel.js         # Cấu hình multer cho upload file Excel
-├── routes/                   # Định nghĩa endpoint, tách theo domain — routes/index.js chỉ gom lại
-└── utils/
-    ├── auditLog.js             # Ghi nhật ký thao tác (kèm warehouse_id để lọc theo quyền kho)
-    └── response.js              # Chuẩn hóa response { success, data, message }
-
+│   ├── auth.js             # JWT verification
+│   ├── authorize.js        # Role & warehouse permission checks
+│   └── errorHandler.js     # Global error handler
+├── routes/
+│   ├── auth.routes.js
+│   ├── user.routes.js
+│   ├── inventory.routes.js
+│   ├── import.routes.js
+│   ├── export.routes.js
+│   ├── picking.routes.js
+│   ├── warehouse.routes.js
+│   └── auditLog.routes.js
+├── controllers/            # Business logic per route
+├── services/               # Reusable service layer
+└── utils/                  # Helpers: Excel parser, PDF gen, etc.
 sql/
-├── 01_schema.sql             # Schema gốc
-└── 02_audit_logs_warehouse.sql  # Migration bổ sung (chạy sau schema gốc, xem mục Database bên dưới)
+└── wms-pro.sql              # Full database schema
 ```
 
-## Cài đặt & chạy local
+---
 
-### Yêu cầu
+## 🔐 Authorization Model
 
-- Node.js ≥ 18
-- MySQL (khuyến nghị XAMPP cho local, hoặc kết nối thẳng tới Aiven)
+| Role                 | Scope                                                    |
+| -------------------- | -------------------------------------------------------- |
+| **Admin**            | Full access — all warehouses, user management, audit log |
+| **Warehouse Keeper** | Scoped to assigned warehouse(s) only                     |
 
-### Các bước
+Every protected route checks:
 
-```bash
-git clone https://github.com/NrocneK/wms-pro-backend.git
-cd wms-pro-backend
-npm install
-```
+1. Valid JWT token
+2. Role permission (Admin vs Keeper)
+3. Warehouse scope (for Keepers)
 
-Tạo file `.env` từ mẫu:
+---
 
-```bash
-cp .env.example .env
-```
+## 👤 Author
 
-Mở `.env` và điền đúng thông tin kết nối MySQL, `JWT_SECRET` (chuỗi ngẫu nhiên dài, không dùng giá trị mẫu khi lên production), và `ALLOWED_ORIGINS` (domain frontend được phép gọi API).
+**Ngo Minh Nhut**
 
-### Database
-
-Import lần lượt theo đúng thứ tự:
-
-```bash
-mysql -u <user> -p <database> < sql/01_schema.sql
-mysql -u <user> -p <database> < sql/02_audit_logs_warehouse.sql
-```
-
-> ⚠️ Nếu database đã tồn tại từ trước (chưa có cột `warehouse_id` trong bảng `audit_logs`), **bắt buộc chạy `02_audit_logs_warehouse.sql`** — thiếu bước này audit log sẽ lỗi khi ghi/đọc.
-
-### Chạy server
-
-```bash
-npm run dev     # chế độ dev, tự reload khi sửa code (nodemon)
-npm start        # chế độ production
-```
-
-Server mặc định chạy ở `http://localhost:3001`, API gốc tại `http://localhost:3001/api/v1`.
-
-## Tổng quan API
-
-Toàn bộ endpoint nằm dưới `/api/v1`, yêu cầu header `Authorization: Bearer <token>` trừ `/auth/login` và `/auth/refresh`.
-
-| Nhóm          | Mô tả                                                       |
-| ------------- | ----------------------------------------------------------- |
-| `/auth`       | Đăng nhập, làm mới token, đổi mật khẩu                      |
-| `/products`   | Danh mục sản phẩm (catalog-level, không gắn kho)            |
-| `/inventory`  | Tồn kho theo từng kho — CRUD, thay thế hàng loạt qua Excel  |
-| `/imports`    | Phiếu nhập kho — tạo, xác nhận, đọc Excel                   |
-| `/exports`    | Phiếu xuất kho — tạo, soạn hàng, xác nhận, hủy              |
-| `/warehouses` | Danh sách kho                                               |
-| `/users`      | Quản lý tài khoản (chỉ admin)                               |
-| `/audit-logs` | Nhật ký thao tác — tự động lọc theo quyền kho của người xem |
-| `/dashboard`  | Số liệu tổng quan, lịch sử giao dịch theo ngày              |
-| `/reports`    | Báo cáo tồn kho theo danh mục, hoạt động người dùng         |
-
-## Phân quyền
-
-3 vai trò: **admin** (toàn quyền), **manager** (nhập/xuất/sửa tồn kho), **staff** (nhập/xuất, chỉ xem báo cáo). Mỗi tài khoản có thể được **gán 1 kho cụ thể** (`warehouse_code`) — khi đó mọi truy vấn dữ liệu (tồn kho, phiếu, audit log...) tự động bị giới hạn chỉ trong kho đó thông qua `middleware/warehouseGuard.js`. Tài khoản không gán kho (thường là admin) xem được toàn hệ thống.
-
-## Các quy tắc kỹ thuật cần lưu ý
-
-- **Thứ tự route quan trọng:** `/exports/packing` phải đăng ký trước `/exports/:id`, `/users/me` phải trước `/users/:id` — nếu đảo thứ tự Express sẽ hiểu nhầm tham số động.
-- **MySQL 8.4 + `mysql2`:** không dùng placeholder `?` cho `LIMIT`/`OFFSET` trong prepared statement — phải inline số nguyên đã validate.
-- **Ngày tháng:** tính "hôm nay" ở tầng Node.js, không dùng `CURDATE()` của MySQL (tránh lệch múi giờ khi so sánh với dữ liệu JS).
-
-## Triển khai (Production)
-
-Đang chạy trên **Render** (backend) kết nối tới **Aiven** (MySQL managed). Khi deploy, đảm bảo biến môi trường `NODE_ENV=production`, `ALLOWED_ORIGINS` trỏ đúng domain frontend thật, và `JWT_SECRET` là chuỗi ngẫu nhiên riêng (không dùng chung với môi trường dev).
+- GitHub: [@NrocneK](https://github.com/NrocneK)
+- Email: kdc.1110639@gmail.com

@@ -1,3 +1,11 @@
+-- ============================================================
+-- WMS Pro — Schema hoàn chỉnh
+-- Đây là schema-only (không có dữ liệu mẫu) — dùng để tạo database mới
+-- từ đầu với đúng cấu trúc đang chạy thật ở local/production hiện tại.
+--
+-- Cách dùng: mysql -u <user> -p <database> < sql/schema.sql
+-- ============================================================
+
 /*
  Navicat Premium Data Transfer
 
