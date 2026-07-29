@@ -285,22 +285,40 @@ const updateInventoryItem = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
-    const [[inv]] = await conn.execute("SELECT product_id,warehouse_id FROM inventory WHERE id=?", [req.params.id]);
+    const [[inv]] = await conn.execute("SELECT product_id,warehouse_id,quantity AS old_quantity FROM inventory WHERE id=?", [req.params.id]);
     if (!inv) return R.notFound(res, "Không tìm thấy sản phẩm");
     if (!assertWarehouse(inv.warehouse_id, req.user)) return R.forbidden(res, "Bạn không có quyền sửa kho này");
 
-    const { name, unit, cost_price, sell_price, min_stock, location_text } = req.body;
+    const { name, unit, cost_price, sell_price, min_stock, location_text, quantity } = req.body;
+    const minS = Number(min_stock) || 5;
+    // Cho phép không truyền quantity (form cũ) — khi đó giữ nguyên số lượng hiện tại, không đổi
+    const newQty = quantity === undefined || quantity === null || quantity === ""
+      ? inv.old_quantity
+      : Math.max(0, Number(quantity) || 0);
+
     await conn.execute(
       "UPDATE products SET name=?,unit=?,cost_price=?,sell_price=? WHERE id=?",
       [name, unit, Number(cost_price) || 0, Number(sell_price) || 0, inv.product_id]
     );
+    // zero_since: đặt NOW() khi số lượng VỪA chạm 0 (chưa từng =0 trước đó), xóa về NULL khi
+    // số lượng hồi phục >0 — cùng quy ước với luồng nhập/xuất kho, để tính năng "thu hồi vị trí
+    // sau 3 ngày hết hàng" hoạt động nhất quán dù số lượng thay đổi qua đường nào.
     await conn.execute(
-      "UPDATE inventory SET min_stock=?,location_text=? WHERE id=?",
-      [Number(min_stock) || 5, location_text || "", req.params.id]
+      `UPDATE inventory
+       SET quantity=?, min_stock=?, location_text=?, status=?,
+           zero_since=CASE
+             WHEN ?=0 AND zero_since IS NULL THEN NOW()
+             WHEN ?>0 THEN NULL
+             ELSE zero_since
+           END
+       WHERE id=?`,
+      [newQty, minS, location_text || "", calcStatus(newQty, minS), newQty, newQty, req.params.id]
     );
     await conn.commit();
+
+    const qtyChangeNote = newQty !== inv.old_quantity ? `, SL: ${inv.old_quantity} → ${newQty}` : "";
     await writeLog(db, req.user, "UPDATE", "inventory", req.params.id,
-      `Cập nhật sản phẩm "${name}" (id tồn kho=${req.params.id}): giá vốn=${cost_price}, giá bán=${sell_price}, tồn tối thiểu=${min_stock}, vị trí=${location_text || "—"}`, inv.warehouse_id);
+      `Cập nhật sản phẩm "${name}" (id tồn kho=${req.params.id}): giá vốn=${cost_price}, giá bán=${sell_price}, tồn tối thiểu=${min_stock}, vị trí=${location_text || "—"}${qtyChangeNote}`, inv.warehouse_id);
     return R.ok(res, {});
 
   } catch (err) {
